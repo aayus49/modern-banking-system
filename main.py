@@ -327,9 +327,17 @@ class BankAccount(ABC):
             (self.account_number, limit)
         )
         
-        transactions = cursor.fetchall()
-        conn.close()
+        transactions = []
+        for row in cursor.fetchall():
+            transactions.append({
+                "amount": row["amount"],
+                "type": row["type"],
+                "timestamp": datetime.strptime(row["timestamp"], "%Y-%m-%d %H:%M:%S") 
+                    if isinstance(row["timestamp"], str) 
+                    else row["timestamp"]
+            })
         
+        conn.close()
         return transactions
 
     @abstractmethod
@@ -646,10 +654,8 @@ class BankCLI:
             print("-" * 50)
             
             for t in transactions:
-                # Handle both string timestamps (from DB) and datetime objects
-                timestamp = datetime.strptime(t["timestamp"], "%Y-%m-%d %H:%M:%S") if isinstance(t["timestamp"], str) else t["timestamp"]
-                    
-                print(f"{timestamp.strftime('%Y-%m-%d %H:%M:%S'):<20} | "
+                timestamp = t["timestamp"].strftime('%Y-%m-%d %H:%M:%S')
+                print(f"{timestamp:<20} | "
                       f"{t['type'].capitalize():<12} | "
                       f"£{t['amount']:>10.2f}")
             
