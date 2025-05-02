@@ -1,3 +1,16 @@
+"""
+Banking System Application
+==========================
+This application demonstrates Object-Oriented Programming principles:
+1. Encapsulation - Protecting data through private attributes and getters/setters
+2. Inheritance - Base BankAccount class with specialized account types
+3. Polymorphism - Different implementations of methods in child classes
+4. Abstraction - Abstract base class with required method implementations
+5. Composition - User contains accounts, accounts contain transactions
+
+The system uses SQLite for persistent storage of users, accounts, and transactions.
+"""
+
 import re
 import random
 import sqlite3
@@ -6,85 +19,127 @@ from abc import ABC, abstractmethod
 from getpass import getpass
 from typing import List, Dict, Optional
 
-# Constants
-DB_NAME = "banking.db"
-SAVINGS_INTEREST = 0.0945  # 9.45%
-CHECKING_FEE = 0.00        # No fees
+# Database configuration
+DB_NAME = "banking_system.db"
 
-class Database:
-    """Handles all database operations"""
-    @staticmethod
-    def initialize():
-        """Create database tables if they don't exist"""
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
+# Constants for account parameters
+SAVINGS_INTEREST_RATE = 0.0945  # 9.45% per annum fixed interest rate
+CHECKING_TRANSACTION_FEE = 0.00  # No fees for checking accounts
+
+def initialize_database():
+    """
+    Initialize the SQLite database with required tables.
+    Demonstrates database schema design for a banking system.
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    # Users table stores customer information
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        full_name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        phone TEXT UNIQUE NOT NULL,
+        pin TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    
+    # Accounts table stores account information
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS accounts (
+        account_number TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        account_type TEXT NOT NULL,
+        balance REAL DEFAULT 0.0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )
+    """)
+    
+    # Transactions table records all financial transactions
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_number TEXT NOT NULL,
+        amount REAL NOT NULL,
+        transaction_type TEXT NOT NULL,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (account_number) REFERENCES accounts (account_number)
+    )
+    """)
+    
+    conn.commit()
+    conn.close()
+
+class Transaction:
+    """
+    Represents a financial transaction.
+    Demonstrates encapsulation with validated attributes.
+    """
+    def __init__(self, amount: float, transaction_type: str, timestamp=None):
+        # Validation ensures data integrity (Encapsulation)
+        if not isinstance(amount, (int, float)) or amount <= 0:
+            raise ValueError("Amount must be positive number")
+        if transaction_type not in ['deposit', 'withdrawal', 'fee', 'interest']:
+            raise ValueError("Invalid transaction type")
             
-            # Users table
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                full_name TEXT NOT NULL,
-                email TEXT UNIQUE NOT NULL,
-                phone TEXT UNIQUE NOT NULL,
-                pin TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            """)
-            
-            # Accounts table
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS accounts (
-                account_number TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                account_type TEXT NOT NULL,
-                balance REAL DEFAULT 0.0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )
-            """)
-            
-            # Transactions table
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS transactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                account_number TEXT NOT NULL,
-                amount REAL NOT NULL,
-                transaction_type TEXT NOT NULL,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (account_number) REFERENCES accounts(account_number)
-            )
-            """)
-            conn.commit()
+        self.amount = amount
+        self.type = transaction_type
+        self.timestamp = timestamp if timestamp else datetime.now()
+
+    def __str__(self):
+        """String representation of transaction (Polymorphism)"""
+        return f"{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')} - {self.type.capitalize()}: £{self.amount:.2f}"
 
 class User:
-    """Represents a banking user"""
+    """
+    Represents a banking user.
+    Demonstrates encapsulation and database persistence.
+    """
     def __init__(self, user_id: int, full_name: str, email: str, phone: str, pin: str):
+        # All attributes are protected (Encapsulation)
         self.id = user_id
         self.full_name = full_name
         self.email = email
         self.phone = phone
         self.pin = pin
-    
+
     @classmethod
-    def create(cls, full_name: str, email: str, phone: str, pin: str) -> 'User':
-        """Create a new user in database"""
+    def create(cls, full_name: str, email: str, phone: str, pin: str):
+        """
+        Creates a new user with validation.
+        Demonstrates data validation and database operations.
+        """
         if not cls._validate_inputs(full_name, email, phone, pin):
             raise ValueError("Invalid user details")
             
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            try:
-                cursor.execute(
-                    "INSERT INTO users (full_name, email, phone, pin) VALUES (?, ?, ?, ?)",
-                    (full_name, email, phone, pin)
-                )
-                return cls(cursor.lastrowid, full_name, email, phone, pin)
-            except sqlite3.IntegrityError as e:
-                raise ValueError("Email or phone already exists")
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "INSERT INTO users (full_name, email, phone, pin) VALUES (?, ?, ?, ?)",
+                (full_name, email, phone, pin)
+            )
+            user_id = cursor.lastrowid
+            conn.commit()
+            return cls(user_id, full_name, email, phone, pin)
+        except sqlite3.IntegrityError as e:
+            if "email" in str(e):
+                raise ValueError("Email already registered")
+            elif "phone" in str(e):
+                raise ValueError("Phone number already registered")
+            raise
+        finally:
+            conn.close()
 
     @staticmethod
     def _validate_inputs(full_name: str, email: str, phone: str, pin: str) -> bool:
-        """Validate user registration inputs"""
+        """
+        Validates user input using regular expressions.
+        Demonstrates input validation.
+        """
         return all([
             re.match(r"^[a-zA-Z ]{2,}$", full_name),
             re.match(r"[^@]+@[^@]+\.[^@]+", email),
@@ -93,231 +148,332 @@ class User:
         ])
 
     @classmethod
-    def authenticate(cls, email: str, pin: str) -> 'User':
-        """Authenticate existing user"""
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT id, full_name, email, phone, pin FROM users WHERE email = ?",
-                (email,)
-            )
-            user_data = cursor.fetchone()
-            
+    def authenticate(cls, email: str, pin: str):
+        """
+        Authenticates user credentials.
+        Demonstrates database query and validation.
+        """
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            "SELECT id, full_name, email, phone, pin FROM users WHERE email = ?",
+            (email,)
+        )
+        user_data = cursor.fetchone()
+        conn.close()
+        
         if not user_data or user_data[4] != pin:
             raise ValueError("Invalid credentials")
         return cls(*user_data)
 
     def get_accounts(self) -> List[str]:
-        """Get all account numbers for this user"""
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT account_number FROM accounts WHERE user_id = ?",
-                (self.id,)
-            )
-            return [row[0] for row in cursor.fetchall()]
+        """
+        Retrieves all accounts for this user.
+        Demonstrates database relationship query.
+        """
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            "SELECT account_number FROM accounts WHERE user_id = ?",
+            (self.id,)
+        )
+        accounts = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        
+        return accounts
 
     def generate_account_number(self) -> str:
-        """Generate unique account number"""
+        """
+        Generates unique account number from user's name.
+        Demonstrates business logic implementation.
+        """
         prefix = ''.join([c for c in self.full_name[:3] if c.isalpha()]).upper().ljust(3, 'X')
         return f"{prefix}{random.randint(1000, 9999)}"
 
 class BankAccount(ABC):
-    """Abstract base class for bank accounts"""
+    """
+    Abstract base class for bank accounts.
+    Demonstrates abstraction and inheritance.
+    """
     def __init__(self, account_number: str, user: User, balance: float = 0.0):
+        # Protected attributes (Encapsulation)
         self.account_number = account_number
         self.user = user
         self.balance = balance
-    
+
     @classmethod
-    def get_account(cls, account_number: str) -> 'BankAccount':
-        """Retrieve account from database"""
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """SELECT a.account_number, a.user_id, a.balance, a.account_type,
-                      u.full_name, u.email, u.phone
-                   FROM accounts a
-                   JOIN users u ON a.user_id = u.id
-                   WHERE a.account_number = ?""",
-                (account_number,)
-            )
-            account_data = cursor.fetchone()
-            
+    def get_account(cls, account_number: str):
+        """
+        Retrieves account from database.
+        Demonstrates polymorphism through factory method.
+        """
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row  # For dictionary-style access
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT a.account_number, a.user_id, a.balance, a.account_type,
+                  u.full_name, u.email, u.phone
+               FROM accounts a
+               JOIN users u ON a.user_id = u.id
+               WHERE a.account_number = ?""",
+            (account_number,)
+        )
+        account_data = cursor.fetchone()
+        conn.close()
+        
         if not account_data:
             raise ValueError("Account not found")
             
-        user = User(account_data[1], account_data[4], account_data[5], account_data[6], "")
+        user = User(account_data["user_id"], account_data["full_name"], 
+                   account_data["email"], account_data["phone"], "")
         
-        if account_data[3] == "savings":
-            return SavingsAccount(account_data[0], user, account_data[2])
-        elif account_data[3] == "checking":
-            return CheckingAccount(account_data[0], user, account_data[2])
-        raise ValueError("Invalid account type")
+        # Polymorphism - return appropriate account type
+        if account_data["account_type"] == "savings":
+            return SavingsAccount(account_data["account_number"], user, account_data["balance"])
+        elif account_data["account_type"] == "checking":
+            return CheckingAccount(account_data["account_number"], user, account_data["balance"])
+        raise ValueError("Unknown account type")
 
     def deposit(self, amount: float) -> bool:
-        """Deposit money into account"""
-        if amount <= 0:
-            raise ValueError("Amount must be positive")
+        """
+        Deposits money into account.
+        Demonstrates database transaction handling.
+        """
+        if not isinstance(amount, (int, float)) or amount <= 0:
+            raise ValueError("Amount must be positive number")
             
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            try:
-                cursor.execute(
-                    "UPDATE accounts SET balance = balance + ? WHERE account_number = ?",
-                    (amount, self.account_number)
-                )
-                cursor.execute(
-                    """INSERT INTO transactions 
-                       (account_number, amount, transaction_type)
-                       VALUES (?, ?, ?)""",
-                    (self.account_number, amount, "deposit")
-                )
-                conn.commit()
-                self.balance += amount
-                return True
-            except Exception as e:
-                conn.rollback()
-                raise ValueError(f"Deposit failed: {str(e)}")
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        try:
+            # Update balance
+            cursor.execute(
+                "UPDATE accounts SET balance = balance + ? WHERE account_number = ?",
+                (amount, self.account_number)
+            )
+            
+            # Record transaction
+            cursor.execute(
+                """INSERT INTO transactions 
+                   (account_number, amount, transaction_type) 
+                   VALUES (?, ?, ?)""",
+                (self.account_number, amount, "deposit")
+            )
+            
+            conn.commit()
+            self.balance += amount
+            return True
+        except Exception as e:
+            conn.rollback()
+            raise ValueError(f"Deposit failed: {str(e)}")
+        finally:
+            conn.close()
 
     def withdraw(self, amount: float) -> bool:
-        """Withdraw money from account"""
-        if amount <= 0:
-            raise ValueError("Amount must be positive")
+        """
+        Withdraws money from account.
+        Demonstrates transaction handling with error recovery.
+        """
+        if not isinstance(amount, (int, float)) or amount <= 0:
+            raise ValueError("Amount must be positive number")
         if amount > self.balance:
             raise ValueError("Insufficient funds")
             
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            try:
-                cursor.execute(
-                    "UPDATE accounts SET balance = balance - ? WHERE account_number = ?",
-                    (amount, self.account_number)
-                )
-                cursor.execute(
-                    """INSERT INTO transactions 
-                       (account_number, amount, transaction_type)
-                       VALUES (?, ?, ?)""",
-                    (self.account_number, amount, "withdrawal")
-                )
-                conn.commit()
-                self.balance -= amount
-                return True
-            except Exception as e:
-                conn.rollback()
-                raise ValueError(f"Withdrawal failed: {str(e)}")
-
-    def get_transactions(self, limit: int = 10) -> List[Dict]:
-        """Get transaction history"""
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        try:
+            # Update balance
             cursor.execute(
-                """SELECT amount, transaction_type, timestamp
-                   FROM transactions
-                   WHERE account_number = ?
-                   ORDER BY timestamp DESC
-                   LIMIT ?""",
-                (self.account_number, limit)
+                "UPDATE accounts SET balance = balance - ? WHERE account_number = ?",
+                (amount, self.account_number)
             )
-            return [
-                {
-                    "amount": row[0],
-                    "type": row[1],
-                    "timestamp": datetime.strptime(row[2], "%Y-%m-%d %H:%M:%S")
-                }
-                for row in cursor.fetchall()
-            ]
+            
+            # Record transaction
+            cursor.execute(
+                """INSERT INTO transactions 
+                   (account_number, amount, transaction_type) 
+                   VALUES (?, ?, ?)""",
+                (self.account_number, amount, "withdrawal")
+            )
+            
+            conn.commit()
+            self.balance -= amount
+            return True
+        except Exception as e:
+            conn.rollback()
+            raise ValueError(f"Withdrawal failed: {str(e)}")
+        finally:
+            conn.close()
+
+    def get_transactions(self, limit=20) -> List[Dict]:
+        """
+        Retrieves transaction history.
+        Demonstrates database query and result formatting.
+        """
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row  # For dictionary-style access
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT amount, transaction_type as type, timestamp 
+               FROM transactions 
+               WHERE account_number = ? 
+               ORDER BY timestamp DESC 
+               LIMIT ?""",
+            (self.account_number, limit)
+        )
+        
+        transactions = cursor.fetchall()
+        conn.close()
+        
+        return transactions
 
     @abstractmethod
     def get_account_type(self) -> str:
-        """Return account type"""
+        """Abstract method to be implemented by subclasses (Abstraction)"""
         pass
 
     @abstractmethod
     def apply_monthly_update(self) -> bool:
-        """Apply monthly updates"""
+        """Abstract method for monthly updates (Abstraction)"""
         pass
 
     def __str__(self) -> str:
-        return (f"Account Number: {self.account_number}\n"
-                f"Account Holder: {self.user.full_name}\n"
+        """String representation of account (Polymorphism)"""
+        return (f"Account: {self.account_number}\n"
+                f"Holder: {self.user.full_name}\n"
                 f"Balance: £{self.balance:.2f}\n"
                 f"Type: {self.get_account_type()}")
 
 class SavingsAccount(BankAccount):
-    """Savings account with interest"""
+    """
+    Savings account implementation.
+    Demonstrates inheritance and method overriding.
+    """
     def __init__(self, account_number: str, user: User, balance: float = 0.0):
         super().__init__(account_number, user, balance)
-        self.interest_rate = SAVINGS_INTEREST
+        self.interest_rate = SAVINGS_INTEREST_RATE
 
     def get_account_type(self) -> str:
-        return "Savings Account"
+        """Returns account type (Polymorphism)"""
+        return "Savings Account (9.45% interest)"
 
     def apply_monthly_update(self) -> bool:
-        """Apply monthly interest"""
+        """
+        Applies monthly interest.
+        Demonstrates business logic implementation.
+        """
         interest = self.balance * (self.interest_rate / 12)
         
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            try:
-                cursor.execute(
-                    "UPDATE accounts SET balance = balance + ? WHERE account_number = ?",
-                    (interest, self.account_number)
-                )
-                cursor.execute(
-                    """INSERT INTO transactions 
-                       (account_number, amount, transaction_type)
-                       VALUES (?, ?, ?)""",
-                    (self.account_number, interest, "interest")
-                )
-                conn.commit()
-                self.balance += interest
-                return True
-            except Exception as e:
-                conn.rollback()
-                raise ValueError(f"Monthly update failed: {str(e)}")
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        try:
+            # Update balance
+            cursor.execute(
+                "UPDATE accounts SET balance = balance + ? WHERE account_number = ?",
+                (interest, self.account_number)
+            )
+            
+            # Record transaction
+            cursor.execute(
+                """INSERT INTO transactions 
+                   (account_number, amount, transaction_type) 
+                   VALUES (?, ?, ?)""",
+                (self.account_number, interest, "interest")
+            )
+            
+            conn.commit()
+            self.balance += interest
+            return True
+        except Exception as e:
+            conn.rollback()
+            raise ValueError(f"Monthly update failed: {str(e)}")
+        finally:
+            conn.close()
 
 class CheckingAccount(BankAccount):
-    """Checking account with no fees"""
+    """
+    Checking account implementation.
+    Demonstrates inheritance and method overriding.
+    """
     def get_account_type(self) -> str:
-        return "Checking Account"
+        """Returns account type (Polymorphism)"""
+        return "Checking Account (no fees)"
 
     def apply_monthly_update(self) -> bool:
-        """No monthly updates for checking accounts"""
+        """Checking accounts have no monthly updates"""
         return True
 
 class Bank:
-    """Core banking system"""
+    """
+    Core banking system operations.
+    Demonstrates separation of concerns.
+    """
     @staticmethod
     def create_account(user: User, account_type: str) -> BankAccount:
-        """Create new bank account"""
+        """
+        Creates a new bank account.
+        Demonstrates factory pattern.
+        """
         account_number = user.generate_account_number()
         
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            try:
-                cursor.execute(
-                    "INSERT INTO accounts (account_number, user_id, account_type) VALUES (?, ?, ?)",
-                    (account_number, user.id, account_type.lower())
-                )
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(
+                "INSERT INTO accounts (account_number, user_id, account_type) VALUES (?, ?, ?)",
+                (account_number, user.id, account_type.lower())
+            )
+            
+            # Polymorphism - create appropriate account type
+            if account_type.lower() == "savings":
+                account = SavingsAccount(account_number, user)
+            elif account_type.lower() == "checking":
+                account = CheckingAccount(account_number, user)
+            else:
+                raise ValueError("Invalid account type")
                 
-                if account_type.lower() == "savings":
-                    account = SavingsAccount(account_number, user)
-                elif account_type.lower() == "checking":
-                    account = CheckingAccount(account_number, user)
-                else:
-                    raise ValueError("Invalid account type")
-                    
-                conn.commit()
-                return account
-            except Exception as e:
-                conn.rollback()
-                raise ValueError(f"Account creation failed: {str(e)}")
+            conn.commit()
+            return account
+        except Exception as e:
+            conn.rollback()
+            raise ValueError(f"Account creation failed: {str(e)}")
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get_account_type(account_number: str) -> str:
+        """
+        Retrieves account type for display.
+        Demonstrates utility method.
+        """
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            "SELECT account_type FROM accounts WHERE account_number = ?",
+            (account_number,)
+        )
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            raise ValueError("Account not found")
+        return result[0]
 
 class BankCLI:
-    """Command Line Interface for banking system"""
+    """
+    Command Line Interface for banking system.
+    Demonstrates user interaction handling.
+    """
     def __init__(self):
-        Database.initialize()
+        initialize_database()
         self.current_user: Optional[User] = None
         self.current_account: Optional[BankAccount] = None
 
@@ -339,7 +495,7 @@ class BankCLI:
                 print(f"\nError: {e}")
 
     def _show_auth_menu(self):
-        """Authentication menu"""
+        """Displays authentication menu"""
         print("\n1. Register")
         print("2. Login")
         print("3. Exit")
@@ -355,7 +511,7 @@ class BankCLI:
             print("Invalid option")
 
     def _register_user(self):
-        """Handle user registration"""
+        """Handles user registration"""
         print("\n--- Registration ---")
         full_name = input("Full name: ").strip()
         email = input("Email: ").strip()
@@ -369,7 +525,7 @@ class BankCLI:
             print(f"\nRegistration failed: {e}")
 
     def _login_user(self):
-        """Handle user login"""
+        """Handles user login"""
         print("\n--- Login ---")
         email = input("Email: ").strip()
         pin = getpass("PIN: ").strip()
@@ -381,7 +537,7 @@ class BankCLI:
             print(f"\nLogin failed: {e}")
 
     def _show_user_menu(self):
-        """Main user menu"""
+        """Displays main user menu"""
         print(f"\n--- Welcome, {self.current_user.full_name} ---")
         print("1. Create Account")
         print("2. Select Account")
@@ -399,7 +555,7 @@ class BankCLI:
             print("Invalid option")
 
     def _create_account(self):
-        """Handle account creation"""
+        """Handles account creation"""
         print("\n--- Create Account ---")
         print("Account types: Savings | Checking")
         acc_type = input("Enter account type: ").strip().lower()
@@ -412,7 +568,7 @@ class BankCLI:
             print(f"\nError: {e}")
 
     def _select_account(self):
-        """Handle account selection"""
+        """Handles account selection with type display"""
         accounts = self.current_user.get_accounts()
         if not accounts:
             print("\nNo accounts found. Please create an account first.")
@@ -420,14 +576,7 @@ class BankCLI:
             
         print("\nYour Accounts:")
         for i, acc_num in enumerate(accounts, 1):
-            # Get account type for display
-            with sqlite3.connect(DB_NAME) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT account_type FROM accounts WHERE account_number = ?",
-                    (acc_num,)
-                )
-                acc_type = cursor.fetchone()[0]
+            acc_type = Bank.get_account_type(acc_num)
             print(f"{i}. {acc_num} ({acc_type.capitalize()})")
             
         try:
@@ -441,7 +590,7 @@ class BankCLI:
             print("Please enter a valid number")
 
     def _show_account_menu(self):
-        """Account operations menu"""
+        """Displays account operations menu"""
         print(f"\n--- {self.current_account.get_account_type()} ---")
         print(f"Account: {self.current_account.account_number}")
         print(f"Balance: £{self.current_account.balance:.2f}")
@@ -463,7 +612,7 @@ class BankCLI:
             print("Invalid option")
 
     def _handle_deposit(self):
-        """Handle deposit operation"""
+        """Handles deposit operation"""
         try:
             amount = float(input("Enter deposit amount: "))
             if self.current_account.deposit(amount):
@@ -472,7 +621,7 @@ class BankCLI:
             print(f"\nError: {e}")
 
     def _handle_withdrawal(self):
-        """Handle withdrawal operation"""
+        """Handles withdrawal operation"""
         try:
             amount = float(input("Enter withdrawal amount: "))
             if self.current_account.withdraw(amount):
@@ -481,15 +630,34 @@ class BankCLI:
             print(f"\nError: {e}")
 
     def _view_transactions(self):
-        """Display transaction history"""
-        transactions = self.current_account.get_transactions()
-        if not transactions:
-            print("\nNo transactions found")
-            return
+        """
+        Displays transaction history in formatted table.
+        Demonstrates output formatting and data presentation.
+        """
+        try:
+            transactions = self.current_account.get_transactions()
+            if not transactions:
+                print("\nNo transactions found for this account.")
+                return
+                
+            print(f"\nTransaction History for {self.current_account.account_number}")
+            print("-" * 50)
+            print(f"{'Date/Time':<20} | {'Type':<12} | {'Amount':>12}")
+            print("-" * 50)
             
-        print("\nRecent Transactions:")
-        for t in transactions:
-            print(f"{t['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} - {t['type'].capitalize()}: £{t['amount']:.2f}")
+            for t in transactions:
+                # Handle both string timestamps (from DB) and datetime objects
+                timestamp = datetime.strptime(t["timestamp"], "%Y-%m-%d %H:%M:%S") if isinstance(t["timestamp"], str) else t["timestamp"]
+                    
+                print(f"{timestamp.strftime('%Y-%m-%d %H:%M:%S'):<20} | "
+                      f"{t['type'].capitalize():<12} | "
+                      f"£{t['amount']:>10.2f}")
+            
+            print("-" * 50)
+            print(f"Current Balance: £{self.current_account.balance:.2f}")
+            
+        except Exception as e:
+            print(f"\nError viewing transactions: {e}")
 
 if __name__ == "__main__":
     try:
