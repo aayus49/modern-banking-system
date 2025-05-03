@@ -25,6 +25,7 @@ DB_NAME = "banking_system.db"
 # Constants for account parameters
 SAVINGS_INTEREST_RATE = 0.0945  # 9.45% per annum fixed interest rate
 CHECKING_TRANSACTION_FEE = 0.00  # No fees for checking accounts
+MAX_WITHDRAWAL_LIMIT = 1000.00  # Maximum withdrawal amount per transaction
 
 def initialize_database():
     """
@@ -199,9 +200,17 @@ class BankAccount(ABC):
     """
     def __init__(self, account_number: str, user: User, balance: float = 0.0):
         # Protected attributes (Encapsulation)
-        self.account_number = account_number
-        self.user = user
-        self.balance = balance
+        self._account_number = account_number
+        self._user = user
+        self._balance = balance
+        self._transactions = []
+
+    def check_balance(self) -> float:
+        """
+        Returns the current account balance.
+        Demonstrates simple getter method (Encapsulation).
+        """
+        return self._balance
 
     @classmethod
     def get_account(cls, account_number: str):
@@ -252,7 +261,7 @@ class BankAccount(ABC):
             # Update balance
             cursor.execute(
                 "UPDATE accounts SET balance = balance + ? WHERE account_number = ?",
-                (amount, self.account_number)
+                (amount, self._account_number)
             )
             
             # Record transaction
@@ -260,11 +269,12 @@ class BankAccount(ABC):
                 """INSERT INTO transactions 
                    (account_number, amount, transaction_type) 
                    VALUES (?, ?, ?)""",
-                (self.account_number, amount, "deposit")
+                (self._account_number, amount, "deposit")
             )
             
             conn.commit()
-            self.balance += amount
+            self._balance += amount
+            self._transactions.append(Transaction(amount, "deposit"))
             return True
         except Exception as e:
             conn.rollback()
@@ -274,12 +284,14 @@ class BankAccount(ABC):
 
     def withdraw(self, amount: float) -> bool:
         """
-        Withdraws money from account.
+        Withdraws money from account with £1000 limit per transaction.
         Demonstrates transaction handling with error recovery.
         """
         if not isinstance(amount, (int, float)) or amount <= 0:
             raise ValueError("Amount must be positive number")
-        if amount > self.balance:
+        if amount > MAX_WITHDRAWAL_LIMIT:
+            raise ValueError(f"Withdrawal limit exceeded. Maximum per transaction: £{MAX_WITHDRAWAL_LIMIT:.2f}")
+        if amount > self._balance:
             raise ValueError("Insufficient funds")
             
         conn = sqlite3.connect(DB_NAME)
@@ -289,7 +301,7 @@ class BankAccount(ABC):
             # Update balance
             cursor.execute(
                 "UPDATE accounts SET balance = balance - ? WHERE account_number = ?",
-                (amount, self.account_number)
+                (amount, self._account_number)
             )
             
             # Record transaction
@@ -297,11 +309,12 @@ class BankAccount(ABC):
                 """INSERT INTO transactions 
                    (account_number, amount, transaction_type) 
                    VALUES (?, ?, ?)""",
-                (self.account_number, amount, "withdrawal")
+                (self._account_number, amount, "withdrawal")
             )
             
             conn.commit()
-            self.balance -= amount
+            self._balance -= amount
+            self._transactions.append(Transaction(amount, "withdrawal"))
             return True
         except Exception as e:
             conn.rollback()
@@ -324,7 +337,7 @@ class BankAccount(ABC):
                WHERE account_number = ? 
                ORDER BY timestamp DESC 
                LIMIT ?""",
-            (self.account_number, limit)
+            (self._account_number, limit)
         )
         
         transactions = []
@@ -352,9 +365,9 @@ class BankAccount(ABC):
 
     def __str__(self) -> str:
         """String representation of account (Polymorphism)"""
-        return (f"Account: {self.account_number}\n"
-                f"Holder: {self.user.full_name}\n"
-                f"Balance: £{self.balance:.2f}\n"
+        return (f"Account: {self._account_number}\n"
+                f"Holder: {self._user.full_name}\n"
+                f"Balance: £{self._balance:.2f}\n"
                 f"Type: {self.get_account_type()}")
 
 class SavingsAccount(BankAccount):
@@ -364,7 +377,7 @@ class SavingsAccount(BankAccount):
     """
     def __init__(self, account_number: str, user: User, balance: float = 0.0):
         super().__init__(account_number, user, balance)
-        self.interest_rate = SAVINGS_INTEREST_RATE
+        self._interest_rate = SAVINGS_INTEREST_RATE
 
     def get_account_type(self) -> str:
         """Returns account type (Polymorphism)"""
@@ -375,7 +388,7 @@ class SavingsAccount(BankAccount):
         Applies monthly interest.
         Demonstrates business logic implementation.
         """
-        interest = self.balance * (self.interest_rate / 12)
+        interest = self._balance * (self._interest_rate / 12)
         
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
@@ -384,7 +397,7 @@ class SavingsAccount(BankAccount):
             # Update balance
             cursor.execute(
                 "UPDATE accounts SET balance = balance + ? WHERE account_number = ?",
-                (interest, self.account_number)
+                (interest, self._account_number)
             )
             
             # Record transaction
@@ -392,11 +405,12 @@ class SavingsAccount(BankAccount):
                 """INSERT INTO transactions 
                    (account_number, amount, transaction_type) 
                    VALUES (?, ?, ?)""",
-                (self.account_number, interest, "interest")
+                (self._account_number, interest, "interest")
             )
             
             conn.commit()
-            self.balance += interest
+            self._balance += interest
+            self._transactions.append(Transaction(interest, "interest"))
             return True
         except Exception as e:
             conn.rollback()
@@ -482,17 +496,17 @@ class BankCLI:
     """
     def __init__(self):
         initialize_database()
-        self.current_user: Optional[User] = None
-        self.current_account: Optional[BankAccount] = None
+        self._current_user: Optional[User] = None
+        self._current_account: Optional[BankAccount] = None
 
     def run(self):
         """Main application loop"""
         print("\n=== Modern Banking System ===")
         while True:
             try:
-                if not self.current_user:
+                if not self._current_user:
                     self._show_auth_menu()
-                elif not self.current_account:
+                elif not self._current_account:
                     self._show_user_menu()
                 else:
                     self._show_account_menu()
@@ -527,8 +541,8 @@ class BankCLI:
         pin = getpass("Set 4-digit PIN: ").strip()
         
         try:
-            self.current_user = User.create(full_name, email, phone, pin)
-            print(f"\nWelcome {self.current_user.full_name}! Registration successful.")
+            self._current_user = User.create(full_name, email, phone, pin)
+            print(f"\nWelcome {self._current_user.full_name}! Registration successful.")
         except ValueError as e:
             print(f"\nRegistration failed: {e}")
 
@@ -539,14 +553,14 @@ class BankCLI:
         pin = getpass("PIN: ").strip()
         
         try:
-            self.current_user = User.authenticate(email, pin)
-            print(f"\nWelcome back, {self.current_user.full_name}!")
+            self._current_user = User.authenticate(email, pin)
+            print(f"\nWelcome back, {self._current_user.full_name}!")
         except ValueError as e:
             print(f"\nLogin failed: {e}")
 
     def _show_user_menu(self):
         """Displays main user menu"""
-        print(f"\n--- Welcome, {self.current_user.full_name} ---")
+        print(f"\n--- Welcome, {self._current_user.full_name} ---")
         print("1. Create Account")
         print("2. Select Account")
         print("3. Logout")
@@ -557,7 +571,7 @@ class BankCLI:
         elif choice == "2":
             self._select_account()
         elif choice == "3":
-            self.current_user = None
+            self._current_user = None
             print("Logged out successfully")
         else:
             print("Invalid option")
@@ -569,15 +583,15 @@ class BankCLI:
         acc_type = input("Enter account type: ").strip().lower()
         
         try:
-            self.current_account = Bank.create_account(self.current_user, acc_type)
-            print(f"\nAccount created successfully!\n{self.current_account}")
-            self.current_account = None  # Return to account selection
+            self._current_account = Bank.create_account(self._current_user, acc_type)
+            print(f"\nAccount created successfully!\n{self._current_account}")
+            self._current_account = None  # Return to account selection
         except ValueError as e:
             print(f"\nError: {e}")
 
     def _select_account(self):
         """Handles account selection with type display"""
-        accounts = self.current_user.get_accounts()
+        accounts = self._current_user.get_accounts()
         if not accounts:
             print("\nNo accounts found. Please create an account first.")
             return
@@ -590,8 +604,8 @@ class BankCLI:
         try:
             choice = int(input("Select account: ")) - 1
             if 0 <= choice < len(accounts):
-                self.current_account = BankAccount.get_account(accounts[choice])
-                print(f"\nSelected {self.current_account.get_account_type()}")
+                self._current_account = BankAccount.get_account(accounts[choice])
+                print(f"\nSelected {self._current_account.get_account_type()}")
             else:
                 print("Invalid selection")
         except ValueError:
@@ -599,13 +613,15 @@ class BankCLI:
 
     def _show_account_menu(self):
         """Displays account operations menu"""
-        print(f"\n--- {self.current_account.get_account_type()} ---")
-        print(f"Account: {self.current_account.account_number}")
-        print(f"Balance: £{self.current_account.balance:.2f}")
+        print(f"\n--- {self._current_account.get_account_type()} ---")
+        print(f"Account: {self._current_account._account_number}")
+        print(f"Balance: £{self._current_account.check_balance():.2f}")
+        print(f"Withdrawal Limit: £{MAX_WITHDRAWAL_LIMIT:.2f} per transaction")
         print("\n1. Deposit")
         print("2. Withdraw")
-        print("3. View Transactions")
-        print("4. Back to Accounts")
+        print("3. Check Balance")
+        print("4. View Transactions")
+        print("5. Back to Accounts")
         
         choice = input("Select option: ")
         if choice == "1":
@@ -613,9 +629,11 @@ class BankCLI:
         elif choice == "2":
             self._handle_withdrawal()
         elif choice == "3":
-            self._view_transactions()
+            self._check_balance()
         elif choice == "4":
-            self.current_account = None
+            self._view_transactions()
+        elif choice == "5":
+            self._current_account = None
         else:
             print("Invalid option")
 
@@ -623,19 +641,25 @@ class BankCLI:
         """Handles deposit operation"""
         try:
             amount = float(input("Enter deposit amount: "))
-            if self.current_account.deposit(amount):
-                print(f"\nDeposit successful. New balance: £{self.current_account.balance:.2f}")
+            if self._current_account.deposit(amount):
+                print(f"\nDeposit successful. New balance: £{self._current_account.check_balance():.2f}")
         except ValueError as e:
             print(f"\nError: {e}")
 
     def _handle_withdrawal(self):
-        """Handles withdrawal operation"""
+        """Handles withdrawal operation with limit check"""
         try:
-            amount = float(input("Enter withdrawal amount: "))
-            if self.current_account.withdraw(amount):
-                print(f"\nWithdrawal successful. New balance: £{self.current_account.balance:.2f}")
+            amount = float(input(f"Enter withdrawal amount (Max £{MAX_WITHDRAWAL_LIMIT:.2f}): "))
+            if self._current_account.withdraw(amount):
+                print(f"\nWithdrawal successful. New balance: £{self._current_account.check_balance():.2f}")
         except ValueError as e:
             print(f"\nError: {e}")
+
+    def _check_balance(self):
+        """Displays current account balance"""
+        balance = self._current_account.check_balance()
+        print(f"\nCurrent Balance: £{balance:.2f}")
+        print(f"Withdrawal Limit: £{MAX_WITHDRAWAL_LIMIT:.2f} per transaction")
 
     def _view_transactions(self):
         """
@@ -643,12 +667,12 @@ class BankCLI:
         Demonstrates output formatting and data presentation.
         """
         try:
-            transactions = self.current_account.get_transactions()
+            transactions = self._current_account.get_transactions()
             if not transactions:
                 print("\nNo transactions found for this account.")
                 return
                 
-            print(f"\nTransaction History for {self.current_account.account_number}")
+            print(f"\nTransaction History for {self._current_account._account_number}")
             print("-" * 50)
             print(f"{'Date/Time':<20} | {'Type':<12} | {'Amount':>12}")
             print("-" * 50)
@@ -660,7 +684,7 @@ class BankCLI:
                       f"£{t['amount']:>10.2f}")
             
             print("-" * 50)
-            print(f"Current Balance: £{self.current_account.balance:.2f}")
+            print(f"Current Balance: £{self._current_account.check_balance():.2f}")
             
         except Exception as e:
             print(f"\nError viewing transactions: {e}")
